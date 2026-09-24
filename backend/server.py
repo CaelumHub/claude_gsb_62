@@ -419,9 +419,15 @@ def create_app(node):
         """Read-only simulation: does not mutate state or create a transaction."""
         data = request.get_json(force=True, silent=True) or {}
         sender = data.get("sender") or ZERO_ADDRESS
-        result = node.blockchain.engine.simulate(
+        bc = node.blockchain
+
+        def block_hash_at(height):
+            block = bc.get_block(int(height))
+            return block.hash if block is not None else ""
+
+        result = bc.engine.simulate(
             addr, data.get("function", ""), data.get("args", []), sender,
-            node.blockchain.state, node.blockchain.height)
+            bc.state, bc.height, block_hash_at=block_hash_at)
         return _json(result)
 
     @app.post("/api/contract/<addr>/invoke")

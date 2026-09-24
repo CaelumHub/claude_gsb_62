@@ -8,7 +8,10 @@ interacts with the chain only through the injected globals:
 * ``emit``    — ``emit(name, **data)`` appends an event to the contract log;
 * ``require`` — ``require(cond, msg)`` aborts the call if ``cond`` is false;
 * ``transfer``— ``transfer(to, amount)`` sends the contract's balance outward;
-* ``balance_of`` / ``this_balance`` — balance introspection helpers.
+* ``balance_of`` / ``this_balance`` — balance introspection helpers;
+* ``sha256_hex`` — deterministic SHA-256 hex digest of a string/bytes value;
+* ``block_hash`` — hash of an already-finalized block ("" for future heights);
+* ``block_height`` — height of the block executing the current call.
 
 Deployment runs the module (or an optional ``init(...)`` entry point); invoking
 runs a named function.  Every mutation flows through the :class:`WorldState`,
@@ -104,7 +107,8 @@ class ContractEngine:
         self.max_print = cfg.get("SANDBOX_MAX_PRINT", 50_000)
 
     # -- context ----------------------------------------------------------- #
-    def build_context(self, world_state, contract_addr, sender, value, height):
+    def build_context(self, world_state, contract_addr, sender, value, height,
+                      block_hash_at=None):
         contract = world_state.contract(contract_addr)
         storage = contract["storage"] if contract else {}
         store = StateStore(storage, self.max_keys)
@@ -139,6 +143,23 @@ class ContractEngine:
         def this_balance():
             return world_state.balance(contract_addr)
 
+        def sha256_hex(value):
+            """Deterministic SHA-256 primitive exposed to contracts."""
+            if isinstance(value, str):
+                value = value.encode("utf-8")
+            elif not isinstance(value, bytes):
+                raise SandboxError("sha256_hex expects a string or bytes")
+            return crypto.sha256(value).hex()
+
+        def block_hash(query_height):
+            """Return an already-finalized block hash; future hashes are empty."""
+            query_height = int(query_height)
+            if query_height < 0 or query_height >= int(height):
+                return ""
+            if block_hash_at is None:
+                return ""
+            return block_hash_at(query_height) or ""
+
         context = {
             "state": store,
             "msg": _Msg(sender, float(value), contract_addr),
@@ -147,12 +168,15 @@ class ContractEngine:
             "transfer": transfer,
             "balance_of": balance_of,
             "this_balance": this_balance,
+            "sha256_hex": sha256_hex,
+            "block_hash": block_hash,
             "block_height": height,
         }
         return context, events, transfers
 
     # -- deploy ------------------------------------------------------------ #
-    def deploy(self, code, creator, address, world_state, constructor=None, height=0):
+    def deploy(self, code, creator, address, world_state, constructor=None,
+               height=0, block_hash_at=None):
         """Create a contract at ``address`` and run its init code.
 
         Mutates ``world_state`` (creates the contract, runs init).  Returns a
@@ -167,14 +191,17 @@ class ContractEngine:
 
         world_state.create_contract(address, code, creator)
         context, events, transfers = self.build_context(
-            world_state, address, creator, 0, height)
+            world_state, address, creator, 0, height, block_hash_at)
         ctx = {k: v for k, v in context.items()}
 
-        if constructor:
-            # Expect an ``init`` function taking the constructor args.
-            res = call_function(code, "init", list(constructor), ctx,
-                                output_limit=self.max_print)
-        else:
+        # Run the contract's ``init(...)`` entry point with constructor args.
+        # Contracts with no constructor args still rely on ``init`` (the empty
+        # list is truthiness-False on its own); a module without ``init`` is
+        # executed directly for backwards compatibility.
+        constructor_args = list(constructor) if constructor is not None else []
+        res = call_function(code, "init", constructor_args, ctx,
+                            output_limit=self.max_print)
+        if not res["ok"] and "function 'init' not found" in (res["error"] or ""):
             res = exec_restricted(code, ctx, output_limit=self.max_print)
 
         result["output"] = res["output"]
@@ -192,7 +219,7 @@ class ContractEngine:
 
     # -- invoke (state-changing) ------------------------------------------- #
     def invoke(self, contract_addr, function, args, sender, value,
-               world_state, height=0):
+               world_state, height=0, block_hash_at=None):
         contract = world_state.contract(contract_addr)
         result = {"ok": False, "error": None, "output": "", "events": [],
                   "return": None, "transfers": []}
@@ -200,7 +227,7 @@ class ContractEngine:
             result["error"] = f"contract {contract_addr} not found"
             return result
         context, events, transfers = self.build_context(
-            world_state, contract_addr, sender, value, height)
+            world_state, contract_addr, sender, value, height, block_hash_at)
         res = call_function(contract["code"], function, list(args), context,
                             output_limit=self.max_print)
         result["output"] = res["output"]
@@ -215,7 +242,7 @@ class ContractEngine:
 
     # -- simulate (read-only, no mutation) --------------------------------- #
     def simulate(self, contract_addr, function, args, sender, world_state,
-                 height=0):
+                 height=0, block_hash_at=None):
         snapshot = world_state.copy()
         return self.invoke(contract_addr, function, args, sender, 0,
-                           snapshot, height)
+                           snapshot, height, block_hash_at)

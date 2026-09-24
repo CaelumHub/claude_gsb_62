@@ -164,6 +164,11 @@ class Blockchain:
         receipt = {"txid": tx.txid, "ok": True, "error": None, "events": [],
                    "return": None, "transfers": [], "type": tx.tx_type,
                    "contract": None}
+
+        def block_hash_at(query_height):
+            block = self.get_block(int(query_height))
+            return block.hash if block is not None else ""
+
         try:
             if tx.tx_type == "transfer":
                 if state.balance(tx.sender) < tx.amount + tx.fee:
@@ -176,7 +181,8 @@ class Blockchain:
                 address = self._contract_address(tx)
                 result = self.engine.deploy(
                     tx.data.get("code", ""), tx.sender, address, state,
-                    constructor=tx.data.get("constructor"), height=height)
+                    constructor=tx.data.get("constructor"), height=height,
+                    block_hash_at=block_hash_at)
                 if not result["ok"]:
                     raise ChainValidationError(result["error"] or "deploy failed")
                 receipt["events"] = result["events"]
@@ -190,7 +196,8 @@ class Blockchain:
                 state.add_balance(tx.to, tx.amount)
                 result = self.engine.invoke(
                     tx.to, tx.data.get("function"), tx.data.get("args", []),
-                    tx.sender, tx.amount, state, height)
+                    tx.sender, tx.amount, state, height,
+                    block_hash_at=block_hash_at)
                 if not result["ok"]:
                     raise ChainValidationError(result["error"] or "call failed")
                 receipt["events"] = result["events"]
