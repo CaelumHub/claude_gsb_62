@@ -25,7 +25,7 @@
             <button class="btn ghost sm" onclick="loadTemplate()">📚 从模板载入</button>
             <button class="btn primary sm" onclick="validateCode()">✓ 校验语法</button>
           </div>
-          <div class="hint" style="margin:8px 0;">合约使用 <code>state</code>、<code>msg</code>、<code>emit</code>、<code>require</code>、<code>transfer</code> 等受限 API，禁止 import / IO / 网络。</div>
+          <div class="hint" style="margin:8px 0;">合约使用 <code>state</code>、<code>msg</code>、<code>emit</code>、<code>require</code>、<code>transfer</code>、<code>sha256</code> 等受限 API，禁止 import / IO / 网络。</div>
           <div id="editor" class="editor" contenteditable="true" spellcheck="false" style="min-height:360px;"># 在此编写合约代码
 def init():
     state["owner"] = msg.sender

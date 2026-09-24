@@ -8,7 +8,9 @@ interacts with the chain only through the injected globals:
 * ``emit``    — ``emit(name, **data)`` appends an event to the contract log;
 * ``require`` — ``require(cond, msg)`` aborts the call if ``cond`` is false;
 * ``transfer``— ``transfer(to, amount)`` sends the contract's balance outward;
-* ``balance_of`` / ``this_balance`` — balance introspection helpers.
+* ``balance_of`` / ``this_balance`` — balance introspection helpers;
+* ``sha256``  — ``sha256(data)`` hex SHA-256 of ``str(data)`` (deterministic,
+  so contracts can do commit/reveal and anyone can recompute results).
 
 Deployment runs the module (or an optional ``init(...)`` entry point); invoking
 runs a named function.  Every mutation flows through the :class:`WorldState`,
@@ -139,6 +141,10 @@ class ContractEngine:
         def this_balance():
             return world_state.balance(contract_addr)
 
+        def sha256_hex(data):
+            # Pure and deterministic: safe for consensus-critical recomputation.
+            return crypto.sha256_hex(str(data))
+
         context = {
             "state": store,
             "msg": _Msg(sender, float(value), contract_addr),
@@ -147,6 +153,7 @@ class ContractEngine:
             "transfer": transfer,
             "balance_of": balance_of,
             "this_balance": this_balance,
+            "sha256": sha256_hex,
             "block_height": height,
         }
         return context, events, transfers
